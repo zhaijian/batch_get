@@ -1,7 +1,8 @@
-package batch_get
+package batch
 
 import (
 	"sync"
+	"time"
 )
 
 type Response struct {
@@ -11,22 +12,22 @@ type Response struct {
 
 type Task struct {
 	Batch      int
-	ReqCh      chan interface{}
-	BatchReqCh chan []interface{}
-	RespCh     chan *Response
+	ReqCh      chan string
+	BatchReqCh chan []string
 	wg         sync.WaitGroup
-	Cb         func() (interface{}, error)
+	Cb         func(*BasicDv)
 }
 
-func NewTask(b, workers int, cb func()) *Task {
+func NewTask(b, workers int, cb func(dv *BasicDv)) *Task {
 	t := &Task{
-		Batch:  b,
-		ReqCh:  make(chan interface{}),
-		RespCh: make(chan interface{}),
-		Cb:     cb,
+		Batch:      b,
+		ReqCh:      make(chan string),
+		BatchReqCh: make(chan []string),
+		Cb:         cb,
 	}
 	go t.Do()
-	for i := 0; i < len(workers); i++ {
+	for i := 0; i < workers; i++ {
+		t.wg.Add(1)
 		go t.Worker()
 	}
 	return t
@@ -34,35 +35,45 @@ func NewTask(b, workers int, cb func()) *Task {
 
 func (t *Task) Worker() {
 	for req := range t.BatchReqCh {
-		ds, err := t.Cb(req)
-		t.RespCh <- &Response{ds, err}
-		t.wg.Done()
+		batchGet(req, t.Cb)
+	}
+	t.wg.Done()
+}
+
+func batchGet(arr []string, cb func(dv *BasicDv)) {
+	for _, id := range arr {
+		cb(&BasicDv{
+			Id: id,
+			Mt: time.Now().UnixNano(),
+		})
 	}
 }
 
-type item interface{}
-
 func (t *Task) Do() {
-	reqs := []item{}
+	reqs := []string{}
 	for req := range t.ReqCh {
 		if len(reqs) >= t.Batch {
-			t.wg.Add(1)
 			t.BatchReqCh <- reqs
-			reqs = []item{}
+			reqs = []string{}
 		}
 		reqs = append(reqs, req)
 	}
-	t.wg.Add(1)
-	t.BatchReqCh <- reqs
+	if len(reqs) > 0 {
+		t.BatchReqCh <- reqs
+	}
 	close(t.BatchReqCh)
 }
 
-func (t *Task) Add(req interface{}) {
+func (t *Task) Add(req string) {
 	t.ReqCh <- req
 }
 
-func (t *Task) Close() {
+func (t *Task) Wait() {
 	close(t.ReqCh)
 	t.wg.Wait()
-	close(t.RespCh)
+}
+
+type BasicDv struct {
+	Id string
+	Mt int64
 }
