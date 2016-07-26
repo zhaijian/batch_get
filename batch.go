@@ -5,29 +5,24 @@ import (
 	"time"
 )
 
-type Response struct {
-	Msg interface{}
-	Err error
-}
-
 type Task struct {
 	Batch      int
-	ReqCh      chan string
+	ReqArray   []string
+	RespCh     chan *BasicDv
 	BatchReqCh chan []string
 	wg         sync.WaitGroup
 	Cb         func(*BasicDv)
+	End        bool
 }
 
-func NewTask(b, workers int, cb func(dv *BasicDv)) *Task {
+func NewTask(b, workers int) *Task {
 	t := &Task{
 		Batch:      b,
-		ReqCh:      make(chan string),
+		ReqArray:   []string{},
+		RespCh:     make(chan *BasicDv),
 		BatchReqCh: make(chan []string),
-		Cb:         cb,
 	}
-	go t.Do()
 	for i := 0; i < workers; i++ {
-		t.wg.Add(1)
 		go t.Worker()
 	}
 	return t
@@ -35,42 +30,47 @@ func NewTask(b, workers int, cb func(dv *BasicDv)) *Task {
 
 func (t *Task) Worker() {
 	for req := range t.BatchReqCh {
-		batchGet(req, t.Cb)
+		dvs := batchGet(req)
+		for _, dv := range dvs {
+			t.RespCh <- dv
+		}
+		t.wg.Done()
 	}
-	t.wg.Done()
 }
 
-func batchGet(arr []string, cb func(dv *BasicDv)) {
+func batchGet(arr []string) (dvs []*BasicDv) {
 	for _, id := range arr {
-		cb(&BasicDv{
+		dvs = append(dvs, &BasicDv{
 			Id: id,
 			Mt: time.Now().UnixNano(),
 		})
 	}
-}
-
-func (t *Task) Do() {
-	reqs := []string{}
-	for req := range t.ReqCh {
-		if len(reqs) >= t.Batch {
-			t.BatchReqCh <- reqs
-			reqs = []string{}
-		}
-		reqs = append(reqs, req)
-	}
-	if len(reqs) > 0 {
-		t.BatchReqCh <- reqs
-	}
-	close(t.BatchReqCh)
+	return
 }
 
 func (t *Task) Add(req string) {
-	t.ReqCh <- req
+	if t.End {
+		if len(t.ReqArray) > 0 {
+			t.wg.Add(1)
+			t.BatchReqCh <- t.ReqArray
+		}
+		return
+	}
+	if len(t.ReqArray) >= t.Batch {
+		t.wg.Add(1)
+		t.BatchReqCh <- t.ReqArray
+		t.ReqArray = []string{}
+	}
+	t.ReqArray = append(t.ReqArray, req)
 }
 
 func (t *Task) Wait() {
-	close(t.ReqCh)
+	t.End = true
+	t.Add("")
+
 	t.wg.Wait()
+	close(t.RespCh)
+	close(t.BatchReqCh)
 }
 
 type BasicDv struct {
