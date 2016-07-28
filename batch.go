@@ -12,7 +12,6 @@ type Task struct {
 	BatchReqCh chan []string
 	wg         sync.WaitGroup
 	Cb         func(*BasicDv)
-	End        bool
 }
 
 func NewTask(b, workers int) *Task {
@@ -49,24 +48,22 @@ func batchGet(arr []string) (dvs []*BasicDv) {
 }
 
 func (t *Task) Add(req string) {
-	if t.End {
-		if len(t.ReqArray) > 0 {
-			t.wg.Add(1)
-			t.BatchReqCh <- t.ReqArray
-		}
-		return
-	}
 	if len(t.ReqArray) >= t.Batch {
-		t.wg.Add(1)
-		t.BatchReqCh <- t.ReqArray
-		t.ReqArray = []string{}
+		t.enqCh(t.ReqArray)
 	}
 	t.ReqArray = append(t.ReqArray, req)
 }
 
+func (t *Task) enqCh(arr []string) {
+	t.wg.Add(1)
+	t.BatchReqCh <- t.ReqArray
+	t.ReqArray = []string{}
+}
+
 func (t *Task) Wait() {
-	t.End = true
-	t.Add("")
+	if len(t.ReqArray) > 0 {
+		t.enqCh(t.ReqArray)
+	}
 
 	t.wg.Wait()
 	close(t.RespCh)

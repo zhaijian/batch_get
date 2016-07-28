@@ -9,7 +9,7 @@ import (
 func TestBatch(t *testing.T) {
 	var wg sync.WaitGroup
 
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -31,7 +31,7 @@ func TestBatch(t *testing.T) {
 			}
 			task.Wait()
 			<-cc
-			if count != 98 {
+			if count == 98 {
 				fmt.Println("count ", count)
 			}
 		}()
